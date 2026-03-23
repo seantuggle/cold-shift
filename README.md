@@ -74,16 +74,3 @@ This project is currently **work in progress**. The core tone, parser structure,
 ## Why This Project Is Cool
 
 This project stands out because it is not just a command parser — it already has a clear narrative identity. The writing voice is consistent, the setting is memorable, and the structure is strong enough to grow into a polished interactive fiction game.
-
-## Suggested Next Steps
-
-- add automated tests for parser and dispatch behavior
-- fix duplicate/unreachable command handlers
-- add a dedicated `handle_listen()` function
-- make starting inventory/state consistent with gameplay rules
-- add a small walkthrough or transcript demo
-- include a LICENSE and CONTRIBUTING guide if you plan to share the repo publicly
-
-## License
-
-Add a license before publishing publicly (for example, MIT).
