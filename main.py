@@ -27,37 +27,17 @@ def build_world():
     """Create all rooms and wire up exits."""
     security_office = make_security_office()
 
-    # Stub for Main Lobby (to be fleshed out in next session)
-    from room import Room
-    main_lobby = Room(
-        name="Main Lobby",
-        short_desc=(
-            "MAIN LOBBY\n\n"
-            "The vast entrance hall. The whale skeleton hangs overhead "
-            "in the dark, patient as the grave.\n\n"
-            "Exits: South."
-        ),
-        long_desc=(
-            "MAIN LOBBY\n\n"
-            "The entrance hall of the Miskatonic Museum opens above you "
-            "like a cathedral that lost its faith and found square footage "
-            "instead. The ceiling disappears into darkness. "
-            "Somewhere up there, a blue whale skeleton hangs suspended "
-            "on cables, its bones the color of old ivory.\n\n"
-            "The front doors are chained. The blizzard presses white "
-            "against the glass.\n\n"
-            "You are alone in a very large space designed to make you "
-            "feel exactly this small.\n\n"
-            "Exits: South."
-        ),
-        exits={"south": None},
-    )
+    from rooms.main_lobby import make_main_lobby
+    main_lobby = make_main_lobby()
 
     # Wire exits
     security_office.exits["north"] = main_lobby
     main_lobby.exits["south"] = security_office
+    # East and West stubs — wired when those rooms are built
+    # main_lobby.exits["east"] = gift_shop
+    # main_lobby.exits["west"] = hall_of_antiquities
 
-    return security_office   # starting room
+    return security_office, main_lobby   # return both for lobby access
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +550,138 @@ def handle_wait(player, state):
     )
 
 
+def handle_talk(noun, player, state):
+    from rooms.main_lobby import maya
+    if not noun:
+        return "Talk to who?"
+    noun_l = noun.lower()
+    if "maya" in noun_l:
+        if not maya.present:
+            return (
+                "Maya isn't here. She's gone home into the blizzard.\n\n"
+                "You hope she made it okay."
+            )
+        result = maya.on_talk(state)
+        maya.leave(how="talked")
+        return result
+    if "danny" in noun_l:
+        return (
+            "Danny isn't here right now. "
+            "Danny is somewhere in the museum, being Danny.\n\n"
+            "\"Sup,\" he would say, if he were here. "
+            "That would be the end of the conversation."
+        )
+    if "karen" in noun_l:
+        return handle_call("karen", player, state)
+    return f"There's nobody called '{noun}' to talk to right now."
+
+
+def handle_kiss(noun, player, state):
+    from rooms.main_lobby import maya
+    if "maya" in (noun or "").lower():
+        if not maya.present:
+            return "Maya isn't here. This is, in retrospect, fortunate."
+        return maya.on_kiss(state)
+    return "That's not something you can do right now."
+
+
+def handle_hug(noun, player, state):
+    from rooms.main_lobby import maya
+    if "maya" in (noun or "").lower():
+        if not maya.present:
+            return "Maya's already gone."
+        result = maya.on_hug(state)
+        maya.leave(how="hugged")
+        return result
+    return "That's not something you can do right now."
+
+
+def handle_ask(noun, player, state):
+    from rooms.main_lobby import maya
+    noun_l = (noun or "").lower()
+    if "coffee" in noun_l or "chai" in noun_l or "drink" in noun_l:
+        if not maya.present:
+            return (
+                "Maya's gone. "
+                "She did leave you something behind the café counter, though."
+            )
+        result = maya.on_coffee(state)
+        state.eat(35)
+        maya.leave(how="coffee")
+        return result
+    if "maya" in noun_l:
+        return handle_talk("maya", player, state)
+    return "Ask who about what?"
+
+
+def handle_sit(noun, player, state):
+    noun_l = (noun or "").lower()
+    if "bench" in noun_l or not noun:
+        bench_item = player.current_room.find_item("bench")
+        if bench_item:
+            return (
+                "You sit down.\n\n"
+                "The bench is cold and hard and specifically uncomfortable "
+                "in the way that public benches are uncomfortable on purpose, "
+                "to discourage exactly this.\n\n"
+                "You think about Danny, somewhere in the museum, "
+                "having found himself a warm corner and committed to it "
+                "with his entire being.\n\n"
+                "You stand up.\n\n"
+                "You're not Danny. You refuse to be Danny. "
+                "This is the hill you've chosen."
+            )
+    return "There's nowhere particularly inviting to sit."
+
+
+def handle_open_donations(player, state):
+    from rooms.main_lobby import strange_coin, flattened_penny
+    if getattr(state, 'donations_opened', False):
+        return "You've already gone through the donation box. Once was enough."
+    state.donations_opened = True
+    strange_coin.taken = False
+    flattened_penny.taken = False
+    return (
+        "The padlock opens on the third key you try.\n\n"
+        "Inside:\n"
+        "   A handful of change. Two Canadian quarters, which you resent.\n"
+        "   A child's crayon drawing of the whale skeleton, "
+        "labeled 'THE BIG FISH' with a smile drawn on it.\n"
+        "   A folded note: 'For Timmy's school trip — thank you!! :)'\n"
+        "   A flattened penny from the machine near the gift shop.\n\n"
+        "And at the bottom — a coin you don't recognize. "
+        "Cold to the touch.\n\n"
+        "You pick it up.\n\n"
+        "You feel like a person who opens donation boxes at midnight.\n"
+        "Which is exactly what you are right now."
+    )
+
+
+def handle_flip_coin(player, state):
+    if not player.has_item("strange coin") and not player.has_item("coin"):
+        return "You'd need to be holding a coin for that."
+    return (
+        "It spins. You watch it spin.\n\n"
+        "It lands. You look.\n\n"
+        "Same face. Same mask.\n\n"
+        "You put it in your pocket and don't flip it again."
+    )
+
+
+def handle_drop_coin(player, state):
+    from rooms.main_lobby import strange_coin
+    if not player.has_item("strange coin") and not player.has_item("coin"):
+        return None
+    return (
+        "You set it on the floor and walk to the other side of the room.\n\n"
+        "You check your pocket.\n\n"
+        "It's there.\n\n"
+        "You didn't pick it up.\n"
+        "You're certain you didn't pick it up.\n\n"
+        "You keep walking."
+    )
+
+
 def handle_help():
     return (
         "COLD SHIFT — Commands\n\n"
@@ -603,8 +715,6 @@ def dispatch(verb, noun, player, state):
         return handle_go(noun, player, state)
     elif verb == "look":
         return handle_look(noun, player, state)
-    elif verb == "examine":
-        return handle_examine(noun, player, state)
     elif verb == "take":
         return handle_take(noun, player, state)
     elif verb == "drop":
@@ -629,6 +739,35 @@ def dispatch(verb, noun, player, state):
         return handle_turn_on(noun, player, state)
     elif verb == "turn_off":
         return handle_turn_off(noun, player, state)
+    elif verb == "talk":
+        return handle_talk(noun, player, state)
+    elif verb == "kiss":
+        return handle_kiss(noun, player, state)
+    elif verb == "hug":
+        return handle_hug(noun, player, state)
+    elif verb == "ask":
+        return handle_ask(noun, player, state)
+    elif verb == "sit":
+        return handle_sit(noun, player, state)
+    elif verb == "flip":
+        return handle_flip_coin(player, state)
+    elif verb == "open":
+        # Special case: donations box
+        if noun and ("donat" in noun.lower() or "box" in noun.lower()):
+            return handle_open_donations(player, state)
+        return handle_open(noun, player, state)
+    elif verb == "examine":
+        # Special case: donations box examine also opens it
+        if noun and ("donat" in noun.lower() or "donation box" in noun.lower()):
+            return handle_open_donations(player, state)
+        return handle_examine(noun, player, state)
+    elif verb == "drop":
+        # Special case: strange coin comes back
+        if noun and "coin" in noun.lower():
+            msg = handle_drop_coin(player, state)
+            if msg:
+                return msg
+        return handle_drop(noun, player, state)
     elif verb == "wait":
         return handle_wait(player, state)
     elif verb == "listen":
@@ -705,7 +844,7 @@ def main():
     state = GameState()
     player = Player()
 
-    starting_room = build_world()
+    starting_room, main_lobby = build_world()
     player.current_room = starting_room
 
     # First room description
@@ -716,6 +855,22 @@ def main():
     last_noun = None
 
     while not state.game_over:
+        # Maya timeout check
+        if hasattr(main_lobby, 'check_maya_timeout'):
+            maya_msg = main_lobby.check_maya_timeout(state.moves)
+            if maya_msg:
+                print(f"\n{maya_msg}\n")
+
+        # Pepper spray effect
+        from rooms.main_lobby import maya
+        if maya.pepper_spray_turns > 0:
+            maya.pepper_spray_turns -= 1
+            if maya.pepper_spray_turns > 0:
+                print(
+                    f"\n(Your eyes are still burning. "
+                    f"{maya.pepper_spray_turns} turns of consequences remaining.)\n"
+                )
+
         # Hunger check
         hunger_msg = state.get_hunger_message()
         if hunger_msg:

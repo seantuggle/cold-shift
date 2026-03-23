@@ -44,6 +44,15 @@ VERB_MAP = {
     "speak": "speak", "say": "speak", "recite": "speak",
     "listen": "listen",
 
+    # social
+    "talk": "talk", "speak to": "talk", "talk to": "talk",
+    "greet": "talk", "chat": "talk",
+    "kiss": "kiss",
+    "hug": "hug", "embrace": "hug",
+    "ask": "ask",
+    "sit": "sit", "sit on": "sit", "sit down": "sit",
+    "flip": "flip",
+
     # wait
     "wait": "wait", "z": "wait",
 
