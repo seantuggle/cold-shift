@@ -18,27 +18,44 @@ from rooms.security_office import (
     fridge, magazine, calendar, sock, stapler,
     plant, novelty_mug, lost_and_found, mirror, nicks_desk,
 )
+from rooms.main_lobby import (
+    make_main_lobby,
+    MAYA_LINES, MAYA_COFFEE_EXCHANGE, MAYA_EXIT,
+    get_whale_desc,
+    whale, utility_knife, strange_coin, yellow_ornament,
+    museum_map, security_camera, front_doors, christmas_tree,
+    donations_box, bench, trash_can, staff_exit, maya_coffee,
+)
+from rooms.gift_shop import (
+    make_gift_shop,
+    mayas_coffee, plush_whale, muffin, snow_globe,
+    chalkboard, pastry_case, tip_jar, receipt, paperback,
+    tote_bag, pamphlets,
+)
 
 # ---------------------------------------------------------------------------
 # WORLD SETUP
 # ---------------------------------------------------------------------------
 
-def build_world():
+_main_lobby = None
+
+def build_world(state):
     """Create all rooms and wire up exits."""
+    global _main_lobby
+
     security_office = make_security_office()
-
-    from rooms.main_lobby import make_main_lobby
     main_lobby = make_main_lobby()
+    gift_shop = make_gift_shop()
 
-    # Wire exits
+    _main_lobby = main_lobby
+
     security_office.exits["north"] = main_lobby
     main_lobby.exits["south"] = security_office
-    # East and West stubs — wired when those rooms are built
-    # main_lobby.exits["east"] = gift_shop
-    # main_lobby.exits["west"] = hall_of_antiquities
+    main_lobby.exits["east"] = gift_shop
+    gift_shop.exits["west"] = main_lobby
+    # gift_shop.exits["east"] = hall_of_civilizations  <- wire when Room 4 is built
 
-    return security_office, main_lobby   # return both for lobby access
-
+    return security_office
 
 # ---------------------------------------------------------------------------
 # STARTING INVENTORY
@@ -66,6 +83,8 @@ STARTING_ITEMS_DESC = {
         "A single stick of spearmint gum, slightly squashed "
         "from living in your jacket pocket. "
         "It's gum. It does what gum does."
+        if not True else  # placeholder — overridden dynamically in handle_examine
+        "A single stick of spearmint gum."
     ),
     "keys": (
         "Your key ring. Museum master key — opens most staff doors. "
@@ -87,7 +106,6 @@ STARTING_ITEMS_DESC = {
         "Currently off."
     ),
 }
-
 
 # ---------------------------------------------------------------------------
 # KAREN
@@ -116,7 +134,6 @@ KAREN_CALLS = [
     "or if it took practice.",
 ]
 
-
 def karen_interrupts(state):
     """Fire a Karen radio call if it's time."""
     if state.moves - state.last_karen_call >= state.KAREN_INTERVAL:
@@ -128,27 +145,26 @@ def karen_interrupts(state):
         print(KAREN_CALLS[idx])
         print("─" * 50 + "\n")
 
-
 # ---------------------------------------------------------------------------
 # VERB HANDLERS
 # ---------------------------------------------------------------------------
 
 def handle_go(noun, player, state):
-    if not noun or noun not in DIRECTIONS.values():
+    if not noun:
         return "Which direction?"
-    direction = noun
+    direction = DIRECTIONS.get(noun, noun)
+    if direction not in DIRECTIONS.values():
+        return "Which direction?"
     room = player.current_room
     if direction not in room.exits or room.exits[direction] is None:
         return "You can't go that way."
     player.current_room = room.exits[direction]
     return player.current_room.describe(state)
 
-
 def handle_look(noun, player, state):
     if noun:
         return handle_examine(noun, player, state)
     return player.current_room.look(state)
-
 
 def handle_examine(noun, player, state):
     if not noun:
@@ -158,15 +174,33 @@ def handle_examine(noun, player, state):
     if noun in ["jacket", "coat", "canvas jacket", "my jacket"]:
         return JACKET_DESC
 
+    # Gum — dynamic based on chew state
+    if noun in ["gum", "spearmint gum", "stick of gum"]:
+        return _gum_examine(state)
+
     # Check inventory first
     item = player.get_item(noun)
     if item:
+        # Monitor 7 curse check
+        if item == monitor_7:
+            return _monitor_7_desc(state)
         return item.on_examine(state)
 
     # Check room
     item = player.current_room.find_item(noun)
     if item:
+        # Whale gets progressive description
+        if item == whale and _main_lobby:
+            _main_lobby.whale_visits += 1
+            return get_whale_desc(_main_lobby)
+        # Monitor 7 curse check
+        if item == monitor_7:
+            return _monitor_7_desc(state)
         return item.on_examine(state)
+
+    # Maya in lobby
+    if "maya" in noun and _main_lobby and _main_lobby.maya_present and not _main_lobby.maya_left:
+        return handle_talk_maya(player, state)
 
     # Special examine cases for starting inventory
     for key in STARTING_ITEMS_DESC:
@@ -174,26 +208,83 @@ def handle_examine(noun, player, state):
             return STARTING_ITEMS_DESC[key]
 
     # Room itself
-    if noun in ["room", "here", "around", "surroundings", "office"]:
+    if noun in ["room", "here", "around", "surroundings", "office", "lobby"]:
         return player.current_room.look(state)
 
     return f"You don't see any {noun} here."
 
+def _gum_examine(state):
+    """Dynamic gum description based on chew state."""
+    if state.gum_consumed:
+        return (
+            "The gum is gone. You spat it out a while back.\n\n"
+            "You still have the wrapper somewhere, probably. "
+            "You're that kind of person."
+        )
+    if state.gum_chewing:
+        turns_left = 20 - (state.moves - state.gum_chew_start)
+        return (
+            "You're chewing it right now.\n\n"
+            f"Spearmint. Getting fainter. "
+            f"Maybe {max(1, turns_left)} turns of flavor left, if you're optimistic."
+        )
+    return (
+        "A single stick of spearmint gum, slightly squashed "
+        "from living in your jacket pocket.\n\n"
+        "It's gum. It does what gum does.\n\n"
+        "It also, theoretically, sticks things together. "
+        "You file that away without knowing why."
+    )
+
+def _monitor_7_desc(state):
+    """Monitor 7 description — escalates if Nick is carrying the coin."""
+    if state.coin_pickup_turn is None:
+        return monitor_7.description
+
+    turns_held = state.moves - state.coin_pickup_turn
+
+    if turns_held < 20:
+        return (
+            "Monitor 7.\n\n"
+            "The static has a pattern now.\n\n"
+            "You didn't notice it before. You're not sure when it started. "
+            "It's probably interference from the blizzard.\n\n"
+            "You keep looking at it anyway."
+        )
+    elif turns_held < 40:
+        return (
+            "Monitor 7.\n\n"
+            "It's not static.\n\n"
+            "It's moving. Whatever is on that screen is moving with intention — "
+            "slowly, the way things move when they don't need to hurry.\n\n"
+            "You look away.\n\n"
+            "You look back.\n\n"
+            "Static again. Just static."
+        )
+    else:
+        return (
+            "Monitor 7.\n\n"
+            "It's showing a room.\n\n"
+            "It takes you a moment to recognize it because the angle is wrong — "
+            "no camera in this building is mounted there. "
+            "But you recognize it. It's the room you're standing in.\n\n"
+            "You are visible in the frame.\n\n"
+            "In your pocket, where the coin is, there is a faint light. "
+            "Not much. Just enough to see by, if you were watching from somewhere else.\n\n"
+            "You step to the left.\n\n"
+            "The figure on Monitor 7 steps to the left.\n\n"
+            "You turn the monitor off."
+        )
 
 def handle_take(noun, player, state):
     if not noun:
         return "Take what?"
-
-    # Can't take things already in inventory
     if player.get_item(noun):
         return "You're already carrying that."
-
     item = player.current_room.find_item(noun)
     if not item:
         return f"You don't see any {noun} here."
-
     result = player.take(item, state)
-
     # Special radio logic
     if item == radio:
         state.radio_taken = True
@@ -203,9 +294,10 @@ def handle_take(noun, player, state):
             "\"Callahan. You should have had that on you from the start.\"\n"
             "Click."
         )
-
+    # Coin pickup — start curse clock
+    if item == strange_coin:
+        state.coin_pickup_turn = state.moves
     return result
-
 
 def handle_drop(noun, player, state):
     if not noun:
@@ -215,57 +307,94 @@ def handle_drop(noun, player, state):
         return f"You're not carrying any {noun}."
     return player.drop(item, state)
 
-
 def handle_inventory(player):
     return player.inventory_list()
-
 
 def handle_eat(noun, player, state):
     if not noun:
         return "Eat what?"
-    # Check inventory first, then room
     item = player.get_item(noun) or player.current_room.find_item(noun)
     if not item:
         return f"You don't see any {noun} here."
     return item.on_eat(state)
 
-
 def handle_drink(noun, player, state):
     return handle_eat(noun, player, state)
 
+def handle_chew(noun, player, state):
+    """CHEW GUM — 20-turn countdown then auto-discard."""
+    if noun is not None and "gum" not in noun:
+        return (
+            "Chew what?\n\n"
+            "You have a stick of spearmint gum in your jacket pocket. "
+            "That's about the extent of your options here."
+        )
+    if state.gum_consumed:
+        return (
+            "You already spat it out.\n\n"
+            "There's nothing left. You checked."
+        )
+    if state.gum_chewing:
+        turns_held = state.moves - state.gum_chew_start
+        turns_left = 20 - turns_held
+        if turns_left <= 0:
+            state.gum_chewing = False
+            state.gum_consumed = True
+            return (
+                "The gum has been in your mouth long enough.\n\n"
+                "The flavor is completely gone — just texture now, "
+                "and not a good texture.\n\n"
+                "You spit it out. It's gone."
+            )
+        return (
+            "Still going.\n\n"
+            "Spearmint, technically. More of a memory of spearmint at this point. "
+            f"You've got maybe {turns_left} turns of this before it becomes "
+            "a philosophical exercise."
+        )
+    # Start chewing
+    state.gum_chewing = True
+    state.gum_chew_start = state.moves
+    return (
+        "You fish the gum out of your jacket pocket.\n\n"
+        "It's slightly squashed, the way things get when they live "
+        "in a pocket for too long. The wrapper crinkles loud enough "
+        "to feel embarrassing in an empty museum.\n\n"
+        "You start chewing.\n\n"
+        "Spearmint. It's fine. It's gum.\n\n"
+        "You've had worse nights than this. "
+        "You're trying to remember when."
+    )
 
 def handle_read(noun, player, state):
     if not noun:
         return "Read what?"
-
     item = player.get_item(noun) or player.current_room.find_item(noun)
-
     if not item:
-        # Special: read post-it from inventory
         if "post" in noun or "untruths" in noun or "rears" in noun:
             return handle_postit_read(state)
         return f"You don't see any {noun} here."
-
     if item == logbook:
         return item.on_examine(state)
-
     if item == postit or item.matches("post-it"):
         return handle_postit_read(state)
-
     if item == schedule:
         return schedule.description
-
     if item == dannys_note:
         return dannys_note.description
-
     if item == magazine:
         return magazine.description
-
     if item == calendar:
         return calendar.description
-
+    if item == receipt:
+        return receipt.on_read(state)
+    if item == paperback:
+        return paperback.on_read(state)
+    if item == chalkboard:
+        return chalkboard.on_read(state)
+    if item == pamphlets:
+        return pamphlets.on_read(state)
     return f"There's nothing particularly illuminating to read on the {item.name}."
-
 
 def handle_postit_read(state):
     if state.postit_reversed:
@@ -278,9 +407,7 @@ def handle_postit_read(state):
         )
     return postit.description
 
-
 def handle_reverse(noun, player, state):
-    """Player tries to reverse/decode the post-it."""
     noun = (noun or "").lower()
     is_postit_target = (
         "post" in noun or "note" in noun or
@@ -289,7 +416,6 @@ def handle_reverse(noun, player, state):
     )
     if not is_postit_target:
         return "Reverse what?"
-    # Auto-add postit to inventory if examined (examine text implies pocketing)
     if not player.has_item("post-it") and postit not in player.inventory:
         in_room = player.current_room.find_item("post-it")
         if not in_room and not player.has_item("post-it"):
@@ -305,7 +431,7 @@ def handle_reverse(noun, player, state):
     state.postit_reversed = True
     return (
         "You stare at the note.\n\n"
-        "   rears untruths\n\n"
+        " rears untruths\n\n"
         "You mouth it backwards without really meaning to.\n\n"
         "Hastur returns.\n\n"
         "You sit with that for a moment.\n\n"
@@ -314,7 +440,6 @@ def handle_reverse(noun, player, state):
         "You put the Post-it in your pocket and try not to think "
         "about what you just said out loud."
     )
-
 
 def handle_write(noun, player, state):
     if "logbook" in (noun or "") or "log" in (noun or "") or not noun:
@@ -333,19 +458,15 @@ def handle_write(noun, player, state):
         )
     return "Write what, where?"
 
-
 def handle_call(noun, player, state):
     if not noun:
         return "Call who?"
     noun = noun.lower()
-
     if not player.current_room.find_item("telephone") and \
        not player.has_item("radio") and \
        "maya" not in noun and "103" not in noun:
         return "You'd need a phone or radio for that."
-
     if "karen" in noun or "100" in noun or "supervisor" in noun:
-        # Cooldown — Karen doesn't want to hear from you that often
         moves_since_karen = state.moves - state.last_karen_call
         if moves_since_karen < 20 and state.karen_calls > 0:
             return (
@@ -358,7 +479,6 @@ def handle_call(noun, player, state):
         state.karen_calls += 1
         idx = min(state.karen_calls - 1, len(KAREN_CALLS) - 1)
         return KAREN_CALLS[idx]
-
     if "maya" in noun or "103" in noun or "cafe" in noun or "gift" in noun:
         if state.maya_called:
             return (
@@ -390,7 +510,6 @@ def handle_call(noun, player, state):
             "She hangs up. The office feels quieter than it did "
             "before you called. You hadn't thought that was possible."
         )
-
     if "maintenance" in noun or "102" in noun:
         return (
             "You dial maintenance. It rings eleven times. "
@@ -398,9 +517,7 @@ def handle_call(noun, player, state):
             "Maintenance is aware of the situation. "
             "Maintenance has gone home."
         )
-
     return f"You're not sure how to reach '{noun}' from here."
-
 
 def handle_open(noun, player, state):
     if not noun:
@@ -412,20 +529,17 @@ def handle_open(noun, player, state):
         return item.on_open(state)
     return item.on_examine(state)
 
-
 def handle_use(noun, player, state):
     if not noun:
         return "Use what?"
     item = player.get_item(noun) or player.current_room.find_item(noun)
     if not item:
-        # Special: use radio
         if "radio" in noun:
             if not player.has_item("radio"):
                 return "The radio is on its charger. You should pick it up first."
             return handle_call("karen", player, state)
         return f"You don't see any {noun} here."
     return item.on_use(state)
-
 
 def handle_turn_on(noun, player, state):
     if not noun:
@@ -450,7 +564,6 @@ def handle_turn_on(noun, player, state):
         )
     return f"You can't turn on the {noun}."
 
-
 def handle_turn_off(noun, player, state):
     if "flashlight" in (noun or ""):
         state.flashlight_on = False
@@ -459,7 +572,6 @@ def handle_turn_off(noun, player, state):
         state.radio_on = False
         return "You power down the radio. The static cuts out. The silence is worse."
     return f"You can't turn off the {noun}."
-
 
 WAIT_MESSAGES = [
     "You stand still. The museum breathes around you.",
@@ -475,7 +587,6 @@ WAIT_MESSAGES = [
 ]
 
 WAIT_DREAD_MESSAGES = [
-    # Fires after 50 waits — things getting weird
     "The lights flicker. Once. They come back.",
     "You hear something that might be footsteps from the floor above. There is no floor above you.",
     "Monitor 7's static shifts — almost a shape, almost recognizable. Then nothing.",
@@ -485,7 +596,6 @@ WAIT_DREAD_MESSAGES = [
 
 WAIT_DEATH = """
 You have been standing here for a very long time.
-
 The museum has noticed.
 
 Something that has been patient — geological, oceanic, old in ways
@@ -495,38 +605,31 @@ watching you stand still. Waiting. As you have been waiting.
 It decides you are not going to move on your own.
 
 The lights go out. All of them. Simultaneously.
-Monitor 7 resolves into perfect clarity for the first time.
 
+Monitor 7 resolves into perfect clarity for the first time.
 You see what's been in the static.
 
 You don't scream. There isn't time.
-
 There isn't anything, after that.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                     YOU HAVE DIED
-
-            Cause of death: patience.
-            The museum thanks you for your stillness.
-
+                        YOU HAVE DIED
+              Cause of death: patience.
+         The museum thanks you for your stillness.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-
 def handle_wait(player, state):
     state.wait_count = getattr(state, 'wait_count', 0) + 1
-
     if state.wait_count >= 200:
         print(WAIT_DEATH)
         sys.exit(0)
-
     if state.wait_count >= 50:
-        # Escalating dread messages
         idx = min((state.wait_count - 50) // 10, len(WAIT_DREAD_MESSAGES) - 1)
         return WAIT_DREAD_MESSAGES[idx]
-
     return WAIT_MESSAGES[state.wait_count % len(WAIT_MESSAGES)]
+
+def handle_listen(noun, player, state):
     if "radio" in (noun or "") or not noun:
         if not player.has_item("radio"):
             return (
@@ -549,21 +652,22 @@ def handle_wait(player, state):
         "You tell yourself that's all it is."
     )
 
+def handle_talk_maya(player, state):
+    if not _main_lobby or not _main_lobby.maya_present or _main_lobby.maya_left:
+        return (
+            "Maya isn't here. She left a while ago.\n\n"
+            "You hope she made it home alright in the blizzard."
+        )
+    idx = _main_lobby.maya_line_index % len(MAYA_LINES)
+    _main_lobby.maya_line_index += 1
+    return MAYA_LINES[idx]
 
 def handle_talk(noun, player, state):
-    from rooms.main_lobby import maya
     if not noun:
         return "Talk to who?"
     noun_l = noun.lower()
     if "maya" in noun_l:
-        if not maya.present:
-            return (
-                "Maya isn't here. She's gone home into the blizzard.\n\n"
-                "You hope she made it okay."
-            )
-        result = maya.on_talk(state)
-        maya.leave(how="talked")
-        return result
+        return handle_talk_maya(player, state)
     if "danny" in noun_l:
         return (
             "Danny isn't here right now. "
@@ -575,44 +679,24 @@ def handle_talk(noun, player, state):
         return handle_call("karen", player, state)
     return f"There's nobody called '{noun}' to talk to right now."
 
-
-def handle_kiss(noun, player, state):
-    from rooms.main_lobby import maya
-    if "maya" in (noun or "").lower():
-        if not maya.present:
-            return "Maya isn't here. This is, in retrospect, fortunate."
-        return maya.on_kiss(state)
-    return "That's not something you can do right now."
-
-
-def handle_hug(noun, player, state):
-    from rooms.main_lobby import maya
-    if "maya" in (noun or "").lower():
-        if not maya.present:
-            return "Maya's already gone."
-        result = maya.on_hug(state)
-        maya.leave(how="hugged")
-        return result
-    return "That's not something you can do right now."
-
-
 def handle_ask(noun, player, state):
-    from rooms.main_lobby import maya
     noun_l = (noun or "").lower()
-    if "coffee" in noun_l or "chai" in noun_l or "drink" in noun_l:
-        if not maya.present:
+    if "coffee" in noun_l or "drink" in noun_l:
+        if not _main_lobby or not _main_lobby.maya_present or _main_lobby.maya_left:
             return (
                 "Maya's gone. "
                 "She did leave you something behind the café counter, though."
             )
-        result = maya.on_coffee(state)
+        if _main_lobby.maya_coffee_given:
+            return "Maya already made you a coffee. You have some dignity left."
+        _main_lobby.maya_coffee_given = True
+        maya_coffee.taken = True
+        player.inventory.append(maya_coffee)
         state.eat(35)
-        maya.leave(how="coffee")
-        return result
+        return MAYA_COFFEE_EXCHANGE
     if "maya" in noun_l:
-        return handle_talk("maya", player, state)
+        return handle_talk_maya(player, state)
     return "Ask who about what?"
-
 
 def handle_sit(noun, player, state):
     noun_l = (noun or "").lower()
@@ -621,88 +705,291 @@ def handle_sit(noun, player, state):
         if bench_item:
             return (
                 "You sit down.\n\n"
-                "The bench is cold and hard and specifically uncomfortable "
-                "in the way that public benches are uncomfortable on purpose, "
-                "to discourage exactly this.\n\n"
+                "The bench is cold and hard and uncomfortable "
+                "in the way that public benches are uncomfortable on purpose.\n\n"
                 "You think about Danny, somewhere in the museum, "
-                "having found himself a warm corner and committed to it "
-                "with his entire being.\n\n"
-                "You stand up.\n\n"
-                "You're not Danny. You refuse to be Danny. "
-                "This is the hill you've chosen."
+                "having found a warm corner and committed to it entirely.\n\n"
+                "You stand up. You're not Danny."
             )
-    return "There's nowhere particularly inviting to sit."
+    return "There's nowhere obvious to sit."
 
+def check_maya_exit(player, state):
+    if not _main_lobby:
+        return None
+    if not _main_lobby.maya_present or _main_lobby.maya_left:
+        return None
+    _main_lobby.maya_moves += 1
+    if _main_lobby.maya_moves >= 7:
+        _main_lobby.maya_left = True
+        _main_lobby.maya_present = False
+        return MAYA_EXIT
+    return None
+
+def on_enter_lobby(state):
+    if not _main_lobby:
+        return ""
+    if getattr(state, 'lobby_entered', False):
+        return ""
+    state.lobby_entered = True
+    if state.moves <= 10:
+        _main_lobby.maya_present = True
+        state.maya_positive = True
+        return (
+            "Maya Delacruz is still here.\n\n"
+            "She's by the staff exit, coat half on, scarf in hand, "
+            "in the middle of leaving. She looks up when you come in.\n\n"
+            "\"Oh good, you found the lobby.\" A small smile. "
+            "\"I was starting to think you'd gotten lost on day one.\"\n\n"
+            "She's not quite leaving yet."
+        )
+    else:
+        _main_lobby.maya_left = True
+        state.maya_positive = False
+        return (
+            "The lobby is empty.\n\n"
+            "Maya has already gone — the staff exit is closed, "
+            "cold air still seeping faintly under the door.\n\n"
+            "You just missed her."
+        )
 
 def handle_open_donations(player, state):
-    from rooms.main_lobby import strange_coin, flattened_penny
     if getattr(state, 'donations_opened', False):
         return "You've already gone through the donation box. Once was enough."
     state.donations_opened = True
-    strange_coin.taken = False
-    flattened_penny.taken = False
+    strange_coin.takeable = True
     return (
         "The padlock opens on the third key you try.\n\n"
         "Inside:\n"
-        "   A handful of change. Two Canadian quarters, which you resent.\n"
-        "   A child's crayon drawing of the whale skeleton, "
-        "labeled 'THE BIG FISH' with a smile drawn on it.\n"
-        "   A folded note: 'For Timmy's school trip — thank you!! :)'\n"
-        "   A flattened penny from the machine near the gift shop.\n\n"
+        "  A handful of change. Two Canadian quarters, which you resent.\n"
+        "  A child's crayon drawing of the whale, labeled 'THE BIG FISH' "
+        "with a smile drawn on it.\n"
+        "  A folded note: 'For Timmy's school trip — thank you!! :)'\n\n"
         "And at the bottom — a coin you don't recognize. "
-        "Cold to the touch.\n\n"
+        "Dark. Cold to the touch.\n\n"
         "You pick it up.\n\n"
         "You feel like a person who opens donation boxes at midnight.\n"
         "Which is exactly what you are right now."
     )
 
-
 def handle_flip_coin(player, state):
     if not player.has_item("strange coin") and not player.has_item("coin"):
-        return "You'd need to be holding a coin for that."
+        return "You'd need to be holding the coin for that."
     return (
         "It spins. You watch it spin.\n\n"
-        "It lands. You look.\n\n"
-        "Same face. Same mask.\n\n"
-        "You put it in your pocket and don't flip it again."
+        "It lands.\n\n"
+        "Same face. Both times you've looked it's been the same face.\n\n"
+        "You put it back in your pocket and don't flip it again."
     )
 
-
 def handle_drop_coin(player, state):
-    from rooms.main_lobby import strange_coin
-    if not player.has_item("strange coin") and not player.has_item("coin"):
+    """The coin always comes back. Always."""
+    has_coin = (
+        player.has_item("strange coin") or
+        player.has_item("coin") or
+        player.has_item("dark coin")
+    )
+    if not has_coin:
         return None
     return (
         "You set it on the floor and walk to the other side of the room.\n\n"
         "You check your pocket.\n\n"
         "It's there.\n\n"
         "You didn't pick it up.\n"
-        "You're certain you didn't pick it up.\n\n"
+        "You are certain you didn't pick it up.\n\n"
         "You keep walking."
     )
-
 
 def handle_help():
     return (
         "COLD SHIFT — Commands\n\n"
-        "Movement:    NORTH / SOUTH / EAST / WEST (or N/S/E/W)\n"
-        "Look:        LOOK (or L)\n"
-        "Examine:     EXAMINE [object] (or X [object])\n"
-        "Take:        TAKE [object] / GET [object]\n"
-        "Drop:        DROP [object]\n"
-        "Inventory:   INVENTORY (or I)\n"
-        "Eat/Drink:   EAT [item] / DRINK [item]\n"
-        "Read:        READ [item]\n"
-        "Write:       WRITE [item]\n"
-        "Use:         USE [item]\n"
-        "Call:        CALL [person/number]\n"
-        "Listen:      LISTEN\n"
-        "Reverse:     REVERSE [item] — for when something seems backwards\n"
+        "Movement: NORTH / SOUTH / EAST / WEST (or N/S/E/W)\n"
+        "Look: LOOK (or L)\n"
+        "Examine: EXAMINE [object] (or X [object])\n"
+        "Take: TAKE [object] / GET [object]\n"
+        "Drop: DROP [object]\n"
+        "Inventory: INVENTORY (or I)\n"
+        "Eat/Drink: EAT [item] / DRINK [item]\n"
+        "Chew: CHEW GUM\n"
+        "Read: READ [item]\n"
+        "Write: WRITE [item]\n"
+        "Use: USE [item]\n"
+        "Call: CALL [person/number]\n"
+        "Listen: LISTEN\n"
+        "Reverse: REVERSE [item] — for when something seems backwards\n"
         "Turn on/off: TURN ON [item] / TURN OFF [item]\n\n"
         "Tips: Try examining everything. Try unusual verbs. "
         "Nick has opinions about most things."
     )
 
+# ---------------------------------------------------------------------------
+# ACT SYSTEM
+# ---------------------------------------------------------------------------
+
+def advance_to_act_2(state):
+    """
+    Call when Nick unlocks the Hall of Civilizations door.
+    Act 1 -> Act 2 gate. Requires museum master key (starting inventory).
+    Wire into handle_use() / handle_open() when Room 4 is built.
+    """
+    if state.act >= 2:
+        return None
+    state.act = 2
+    return (
+        "The key turns.\n\n"
+        "The lock is heavy — the kind built for a building that takes "
+        "itself seriously. It resists for a moment, then gives.\n\n"
+        "The door swings inward.\n\n"
+        "The air that comes out is different. Not colder, exactly. "
+        "Just older. Like the room on the other side has been "
+        "holding its breath for a while and has now decided to stop.\n\n"
+        "You go in.\n\n"
+        "Something changes. You can't point to what.\n\n"
+        "You keep walking."
+    )
+
+# ---------------------------------------------------------------------------
+# MAYA FLAVOR TEXT SYSTEM
+# ---------------------------------------------------------------------------
+
+_MAYA_THOUGHTS_ACT1 = [
+    (
+        "You think about the phone call. The way she laughed — unguarded, "
+        "like she wasn't performing anything.\n\n"
+        "You can't remember the last time someone laughed like that at something you said."
+    ),
+    (
+        "Somewhere outside, Maya is driving home through the blizzard. "
+        "You hope she's a careful driver.\n\n"
+        "You have no reason to think she isn't. You hope anyway."
+    ),
+    (
+        "You can still smell the coffee. The good kind. Maya's kind.\n\n"
+        "She knew you'd be here all night with the bad stuff from the office pot. "
+        "She left the good stuff anyway.\n\n"
+        "People don't usually think about things like that."
+    ),
+]
+
+_MAYA_THOUGHTS_ACT2 = [
+    (
+        "You think about Maya. The lobby, the coat half on, "
+        "the way she said your name like she already knew it.\n\n"
+        "You hope whatever is in this building stays in this building."
+    ),
+    (
+        "Maya works here. She comes in every day.\n\n"
+        "She makes the good coffee and writes notes on the chalkboard "
+        "and she has no idea — probably — what's in the east wing.\n\n"
+        "You'd like to keep it that way."
+    ),
+]
+
+_MAYA_THOUGHTS_ACT3 = [
+    (
+        "You think about Maya.\n\n"
+        "You don't let yourself finish the thought.\n\n"
+        "Not right now. Later. If there is a later."
+    ),
+]
+
+def get_maya_thought(state):
+    """
+    Returns a Maya flavor string or None.
+    Only fires if state.maya_positive is True.
+    Gate with a per-room flag in caller to fire at most once per room.
+    """
+    if not getattr(state, "maya_positive", False):
+        return None
+    pools = {
+        1: _MAYA_THOUGHTS_ACT1,
+        2: _MAYA_THOUGHTS_ACT2,
+        3: _MAYA_THOUGHTS_ACT3,
+    }
+    pool = pools.get(getattr(state, "act", 1), _MAYA_THOUGHTS_ACT1)
+    return random.choice(pool) if pool else None
+
+# ---------------------------------------------------------------------------
+# COIN CURSE AMBIENT SYSTEM
+# ---------------------------------------------------------------------------
+
+_COIN_CURSE_EARLY = [
+    (
+        "Your pocket feels heavier than it should.\n\n"
+        "You know it's the coin. You tell yourself it's the coin."
+    ),
+    (
+        "You find yourself thinking about the coin.\n\n"
+        "Not about what it is. Just that it's there. "
+        "That it's always there."
+    ),
+]
+
+_COIN_CURSE_MID = [
+    (
+        "The coin is warm.\n\n"
+        "It wasn't warm before. "
+        "You don't take it out."
+    ),
+    (
+        "You catch yourself checking your pocket.\n\n"
+        "Third time in the last few minutes. "
+        "It's there. It's always there. "
+        "You've stopped being surprised by this."
+    ),
+]
+
+_COIN_CURSE_LATE = [
+    (
+        "Something at the edge of your vision moves when you turn your head.\n\n"
+        "Nothing is there.\n\n"
+        "The coin is warm against your leg."
+    ),
+    (
+        "You stop walking for a moment.\n\n"
+        "You're not sure why. Some instinct.\n\n"
+        "The coin in your pocket is warm. "
+        "The hallway in front of you is very still."
+    ),
+]
+
+_COIN_CURSE_DEEP = [
+    (
+        "You dreamed about the coin last night.\n\n"
+        "You haven't slept. You know this. "
+        "You dreamed about it anyway."
+    ),
+    (
+        "The coin has a face on it.\n\n"
+        "You've looked at it a dozen times. "
+        "You still can't describe the face.\n\n"
+        "You're not sure it's the same face each time."
+    ),
+]
+
+def get_coin_curse_ambient(state):
+    """
+    Returns a coin curse ambient string or None.
+    Fires probabilistically based on how long Nick has carried the coin.
+    """
+    if state.coin_pickup_turn is None:
+        return None
+
+    turns_held = state.moves - state.coin_pickup_turn
+
+    if turns_held < 20:
+        if random.random() < 0.30:
+            return random.choice(_COIN_CURSE_EARLY)
+    elif turns_held < 40:
+        if random.random() < 0.30:
+            return random.choice(_COIN_CURSE_MID)
+    elif turns_held < 60:
+        if random.random() < 0.25:
+            return random.choice(_COIN_CURSE_LATE)
+    else:
+        if random.random() < 0.20:
+            return random.choice(_COIN_CURSE_DEEP)
+
+    return None
 
 # ---------------------------------------------------------------------------
 # MAIN DISPATCH
@@ -710,7 +997,6 @@ def handle_help():
 
 def dispatch(verb, noun, player, state):
     """Route parsed (verb, noun) to the right handler."""
-
     if verb == "go":
         return handle_go(noun, player, state)
     elif verb == "look":
@@ -718,6 +1004,11 @@ def dispatch(verb, noun, player, state):
     elif verb == "take":
         return handle_take(noun, player, state)
     elif verb == "drop":
+        noun_l = (noun or "").lower()
+        if "coin" in noun_l or "strange" in noun_l or "dark" in noun_l:
+            coin_msg = handle_drop_coin(player, state)
+            if coin_msg:
+                return coin_msg
         return handle_drop(noun, player, state)
     elif verb == "inventory":
         return handle_inventory(player)
@@ -725,6 +1016,8 @@ def dispatch(verb, noun, player, state):
         return handle_eat(noun, player, state)
     elif verb == "drink":
         return handle_drink(noun, player, state)
+    elif verb == "chew":
+        return handle_chew(noun, player, state)
     elif verb == "read":
         return handle_read(noun, player, state)
     elif verb == "write":
@@ -732,7 +1025,13 @@ def dispatch(verb, noun, player, state):
     elif verb == "call":
         return handle_call(noun, player, state)
     elif verb == "open":
+        if noun and ("donat" in noun.lower() or "box" in noun.lower()):
+            return handle_open_donations(player, state)
         return handle_open(noun, player, state)
+    elif verb == "examine":
+        if noun and ("donat" in noun.lower() or "donation box" in noun.lower()):
+            return handle_open_donations(player, state)
+        return handle_examine(noun, player, state)
     elif verb == "use":
         return handle_use(noun, player, state)
     elif verb == "turn_on":
@@ -741,33 +1040,12 @@ def dispatch(verb, noun, player, state):
         return handle_turn_off(noun, player, state)
     elif verb == "talk":
         return handle_talk(noun, player, state)
-    elif verb == "kiss":
-        return handle_kiss(noun, player, state)
-    elif verb == "hug":
-        return handle_hug(noun, player, state)
     elif verb == "ask":
         return handle_ask(noun, player, state)
     elif verb == "sit":
         return handle_sit(noun, player, state)
     elif verb == "flip":
         return handle_flip_coin(player, state)
-    elif verb == "open":
-        # Special case: donations box
-        if noun and ("donat" in noun.lower() or "box" in noun.lower()):
-            return handle_open_donations(player, state)
-        return handle_open(noun, player, state)
-    elif verb == "examine":
-        # Special case: donations box examine also opens it
-        if noun and ("donat" in noun.lower() or "donation box" in noun.lower()):
-            return handle_open_donations(player, state)
-        return handle_examine(noun, player, state)
-    elif verb == "drop":
-        # Special case: strange coin comes back
-        if noun and "coin" in noun.lower():
-            msg = handle_drop_coin(player, state)
-            if msg:
-                return msg
-        return handle_drop(noun, player, state)
     elif verb == "wait":
         return handle_wait(player, state)
     elif verb == "listen":
@@ -782,13 +1060,12 @@ def dispatch(verb, noun, player, state):
         print("\n[ COLD SHIFT — abandoned ]")
         sys.exit(0)
     elif verb == "again":
-        return None   # signal to repeat last command
+        return None
     else:
         return (
             f"You're not sure how to '{verb}' that. "
             "Try HELP for a list of commands."
         )
-
 
 # ---------------------------------------------------------------------------
 # OPENING SEQUENCE
@@ -799,21 +1076,20 @@ OPENING = """
 ║                        COLD SHIFT                            ║
 ║                   A Game of Creeping Dread                   ║
 ║                                                              ║
-║    Miskatonic Museum of Natural History and Antiquities      ║
-║                  December 19th. 11:02 PM.                    ║
+║        Miskatonic Museum of Natural History and Antiquities  ║
+║                   December 19th. 11:02 PM.                   ║
 ╚══════════════════════════════════════════════════════════════╝
 
 Outside, the blizzard that the weather service spent three days
 threatening has finally arrived and is making up for lost time.
+
 Inside, six floors of dead things, old bones, and priceless
 artifacts are yours until 6 AM.
 
 First week on the job.
-
 You've had worse weeks. You're trying to remember when.
 
 Your radio crackles before you've even hung up your jacket.
-
 "Callahan." Karen. Already. "We have a crate in the Hall of
 Ancient Civilizations. Acquisitions left it there — don't ask.
 It stays roped off. You don't touch it. You don't let anyone
@@ -827,12 +1103,10 @@ She clicks off. Somewhere in the museum, presumably, Danny is
 following his lead directly into a warm corner and a long nap.
 
 You pour yourself a cup of coffee.
-
 First week on the job.
 
 ──────────────────────────────────────────────────────────────
 """
-
 
 # ---------------------------------------------------------------------------
 # GAME LOOP
@@ -840,49 +1114,62 @@ First week on the job.
 
 def main():
     print(OPENING)
-
     state = GameState()
     player = Player()
-
-    starting_room, main_lobby = build_world()
+    starting_room = build_world(state)
     player.current_room = starting_room
 
-    # First room description
     print(starting_room.describe(state))
     print()
 
     last_verb = None
     last_noun = None
+    last_room = starting_room
 
     while not state.game_over:
-        # Maya timeout check
-        if hasattr(main_lobby, 'check_maya_timeout'):
-            maya_msg = main_lobby.check_maya_timeout(state.moves)
-            if maya_msg:
-                print(f"\n{maya_msg}\n")
 
-        # Pepper spray effect
-        from rooms.main_lobby import maya
-        if maya.pepper_spray_turns > 0:
-            maya.pepper_spray_turns -= 1
-            if maya.pepper_spray_turns > 0:
-                print(
-                    f"\n(Your eyes are still burning. "
-                    f"{maya.pepper_spray_turns} turns of consequences remaining.)\n"
-                )
+        # Detect room change — fire lobby entry event on first visit
+        if player.current_room != last_room:
+            last_room = player.current_room
+            if _main_lobby and player.current_room == _main_lobby:
+                arrival_msg = on_enter_lobby(state)
+                if arrival_msg:
+                    print(f"\n{arrival_msg}\n")
+
+        # Maya exit countdown
+        if _main_lobby and player.current_room == _main_lobby:
+            maya_exit_msg = check_maya_exit(player, state)
+            if maya_exit_msg:
+                print(f"\n{maya_exit_msg}\n")
 
         # Hunger check
         hunger_msg = state.get_hunger_message()
         if hunger_msg:
             print(f"\n{hunger_msg}\n")
 
+        # Gum auto-discard check
+        if state.gum_chewing and state.gum_chew_start is not None:
+            if state.moves - state.gum_chew_start >= 20:
+                state.gum_chewing = False
+                state.gum_consumed = True
+                print(
+                    "\nThe gum has been in your mouth long enough. "
+                    "The flavor is gone — just texture now, and not a good texture. "
+                    "You spit it out. It's gone.\n"
+                )
+
         # Karen check
         karen_interrupts(state)
 
-        # Ambient message (random)
+        # Room ambient message
         ambient = player.current_room.get_ambient()
         if ambient:
             print(f"\n{ambient}\n")
+
+        # Coin curse ambient
+        coin_curse = get_coin_curse_ambient(state)
+        if coin_curse:
+            print(f"\n{coin_curse}\n")
 
         # Prompt
         try:
@@ -926,7 +1213,6 @@ def main():
 
         # Tick state
         state.tick()
-
 
 if __name__ == "__main__":
     main()

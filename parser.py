@@ -34,6 +34,7 @@ VERB_MAP = {
     "remove": "remove", "take off": "remove",
     "eat": "eat", "consume": "eat", "taste": "eat",
     "drink": "drink", "sip": "drink", "swallow": "drink",
+    "chew": "chew", "spit": "chew", 
     "call": "call", "phone": "call", "dial": "call",
     "radio": "call",
     "write": "write", "sign": "write", "fill": "write",
