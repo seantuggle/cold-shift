@@ -32,12 +32,23 @@ from rooms.gift_shop import (
     chalkboard, pastry_case, tip_jar, receipt, paperback,
     tote_bag, pamphlets,
 )
+from rooms.hall_of_civilizations import (
+    make_hall_of_civilizations,
+    pallid_mask, manuscript_fragment, crate,
+)
+from rooms.natural_history_wing import (
+    make_natural_history_wing,
+    danny, danny_key, whale_model, info_terminal,
+    yellow_can, DANNY_SPRINT_TEXT, WHALE_GROWL_TEXT,
+)
 
 # ---------------------------------------------------------------------------
 # WORLD SETUP
 # ---------------------------------------------------------------------------
 
+# Global lobby and wing references
 _main_lobby = None
+_natural_history = None
 
 def build_world(state):
     """Create all rooms and wire up exits."""
@@ -46,14 +57,24 @@ def build_world(state):
     security_office = make_security_office()
     main_lobby = make_main_lobby()
     gift_shop = make_gift_shop()
+    hall = make_hall_of_civilizations()
+    natural_history = make_natural_history_wing()
 
+    global _main_lobby, _natural_history
     _main_lobby = main_lobby
+    _natural_history = natural_history
 
     security_office.exits["north"] = main_lobby
     main_lobby.exits["south"] = security_office
     main_lobby.exits["east"] = gift_shop
+    main_lobby.exits["west"] = hall
     gift_shop.exits["west"] = main_lobby
-    # gift_shop.exits["east"] = hall_of_civilizations  <- wire when Room 4 is built
+    gift_shop.exits["east"] = hall
+    hall.exits["east"] = gift_shop
+    hall.exits["west"] = main_lobby
+    hall.exits["north"] = natural_history
+    natural_history.exits["south"] = hall
+    # natural_history.exits["east"] = reading_room  <- wire when built
 
     return security_office
 
@@ -669,15 +690,73 @@ def handle_talk(noun, player, state):
     if "maya" in noun_l:
         return handle_talk_maya(player, state)
     if "danny" in noun_l:
+        if not state.danny_found:
+            return (
+                "Danny isn't here. "
+                "Danny is somewhere in the museum, being Danny.\n\n"
+                "\"Sup,\" he would say, if he were here. "
+                "That would be the end of the conversation."
+            )
+        if getattr(state, 'danny_gone', False):
+            return "Danny's gone. You don't know where."
+        import random as _r
+        from rooms.natural_history_wing import DANNY_WHISPERS
+        whisper = _r.choice(DANNY_WHISPERS)
         return (
-            "Danny isn't here right now. "
-            "Danny is somewhere in the museum, being Danny.\n\n"
-            "\"Sup,\" he would say, if he were here. "
-            "That would be the end of the conversation."
+            f"\"Danny.\"\n\n"
+            f"Nothing.\n\n"
+            f"\"Danny, it's Nick. Can you hear me?\"\n\n"
+            f"{whisper}\n\n"
+            f"He doesn't hear you. "
+            f"Whatever he's listening to, it isn't you."
         )
     if "karen" in noun_l:
         return handle_call("karen", player, state)
     return f"There's nobody called '{noun}' to talk to right now."
+
+
+def handle_shake(noun, player, state):
+    noun_l = (noun or "").lower()
+    if "danny" in noun_l or "him" in noun_l or "man" in noun_l:
+        if not state.danny_found:
+            return "There's nobody to shake here."
+        if getattr(state, 'danny_gone', False):
+            return "Danny's gone."
+        import random as _r
+        from rooms.natural_history_wing import DANNY_WHISPERS
+        whisper = _r.choice(DANNY_WHISPERS)
+        return (
+            "You grab his shoulders and shake.\n\n"
+            "His head moves. His eyes don't.\n\n"
+            "\"Danny. Hey. Danny, look at me.\"\n\n"
+            f"{whisper}\n\n"
+            "He's not in there.\n\n"
+            "You let go."
+        )
+    return f"You can't shake the {noun or 'that'}."
+
+
+def handle_slap(noun, player, state):
+    noun_l = (noun or "").lower()
+    if "danny" in noun_l or "him" in noun_l or "man" in noun_l:
+        if not state.danny_found:
+            return "There's nobody to slap here."
+        if getattr(state, 'danny_gone', False):
+            return "Danny's gone."
+        import random as _r
+        from rooms.natural_history_wing import DANNY_WHISPERS
+        whisper = _r.choice(DANNY_WHISPERS)
+        return (
+            "You don't want to do this.\n\n"
+            "You do it anyway.\n\n"
+            "His head turns with it. Comes back. "
+            "His eyes don't change.\n\n"
+            f"{whisper}\n\n"
+            "You feel terrible.\n\n"
+            "You'd do it again if you thought it would work.\n\n"
+            "It wouldn't work."
+        )
+    return f"You're not going to slap the {noun or 'that'}."
 
 def handle_ask(noun, player, state):
     noun_l = (noun or "").lower()
@@ -697,6 +776,112 @@ def handle_ask(noun, player, state):
     if "maya" in noun_l:
         return handle_talk_maya(player, state)
     return "Ask who about what?"
+
+def handle_wear(noun, player, state):
+    if not noun:
+        return "Wear what?"
+    noun_l = noun.lower()
+    if "mask" in noun_l or "pallid" in noun_l:
+        item = player.get_item("pallid mask") or player.get_item("mask")
+        if not item:
+            item = player.current_room.find_item("pallid mask")
+            if not item:
+                return "You don't see a mask here."
+            return "You'd need to pick it up first."
+        return item.on_wear(state)
+    return f"You can't wear the {noun}."
+
+
+def handle_remove(noun, player, state):
+    if not noun:
+        return "Remove what?"
+    if "mask" in noun.lower() or "pallid" in noun.lower():
+        if not state.mask_worn:
+            return "You're not wearing the mask."
+        state.mask_worn = False
+        state.mask_worn_turns = 0
+        state.mask_location = 'inventory'
+        return (
+            "You pull the mask from your face.\n\n"
+            "The world snaps back to normal. "
+            "Or what passes for normal in here tonight.\n\n"
+            "Your hands are shaking slightly. "
+            "You hold them still by force of will.\n\n"
+            "The mask is back in your jacket pocket. "
+            "Still cold. "
+            "Still lighter than it should be."
+        )
+    return f"You're not wearing any {noun}."
+
+
+# Mask degrading text — 10 turns of escalating wrongness
+_MASK_TURNS_TEXT = [
+    "",   # turn 0 — handled by on_wear
+    "(The mask sits on your face. The hall looks different through it. "
+    "You can see further than you should be able to.)",
+    "(Something at the edge of your vision. You turn. Nothing there. "
+    "The mask is warm now.)",
+    "(The hieroglyphs on the sarcophagus are moving. "
+    "Not rearranging — translating. You can almost read them.)",
+    "(The diorama figures are all facing you now. "
+    "All of them. You count them. "
+    "There are more than there were.)",
+    "(Your name. Something said your name. "
+    "Not Karen. Not Danny. "
+    "Something that knows your name from somewhere else.)",
+    "(Avery. You see Avery. "
+    "She is standing at the end of the hall. "
+    "She is small and she is wearing her coat. "
+    "She is not Avery.)",
+    "(The hall is not the hall anymore. "
+    "The walls are further away than they should be. "
+    "The ceiling is gone. "
+    "There are two suns. One is black.)",
+    "(You cannot remember why you put this on. "
+    "You cannot remember where you are. "
+    "You know your name. "
+    "N   i   c   k.)",
+    "(t   h   e   r   e   i   s   a   k   i   n   g)",
+]
+
+def _print_mask_turn(state):
+    idx = min(state.mask_worn_turns, len(_MASK_TURNS_TEXT) - 1)
+    text = _MASK_TURNS_TEXT[idx]
+    if text:
+        print(f"\n{text}\n")
+
+
+def _mask_death():
+    print("""
+The mask has been on your face for ten turns.
+
+That was always going to be too long.
+
+You understand everything now.
+
+You understand the crate and the manuscript and the
+yellow sign and the King who wears the Pallid Mask
+and why Danny's hair turned white and why the coin
+is always cold and why there are two suns.
+
+You understand all of it.
+
+You can't unknow it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                  YOU HAVE DIED
+
+         Cause of death: understanding.
+         Some knowledge is a one-way door.
+         Nick Callahan, Security Guard.
+         First week on the job.
+         Last week on the job.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+""")
+    sys.exit(0)
+
 
 def handle_sit(noun, player, state):
     noun_l = (noun or "").lower()
@@ -733,7 +918,7 @@ def on_enter_lobby(state):
     state.lobby_entered = True
     if state.moves <= 10:
         _main_lobby.maya_present = True
-        state.maya_positive = True
+        state.maya_met = True
         return (
             "Maya Delacruz is still here.\n\n"
             "She's by the staff exit, coat half on, scarf in hand, "
@@ -744,7 +929,7 @@ def on_enter_lobby(state):
         )
     else:
         _main_lobby.maya_left = True
-        state.maya_positive = False
+        state.maya_met = False
         return (
             "The lobby is empty.\n\n"
             "Maya has already gone — the staff exit is closed, "
@@ -895,10 +1080,10 @@ _MAYA_THOUGHTS_ACT3 = [
 def get_maya_thought(state):
     """
     Returns a Maya flavor string or None.
-    Only fires if state.maya_positive is True.
+    Only fires if state.maya_met is True.
     Gate with a per-room flag in caller to fire at most once per room.
     """
-    if not getattr(state, "maya_positive", False):
+    if not getattr(state, "maya_met", False):
         return None
     pools = {
         1: _MAYA_THOUGHTS_ACT1,
@@ -1038,6 +1223,14 @@ def dispatch(verb, noun, player, state):
         return handle_turn_on(noun, player, state)
     elif verb == "turn_off":
         return handle_turn_off(noun, player, state)
+    elif verb == "wear":
+        return handle_wear(noun, player, state)
+    elif verb == "remove":
+        return handle_remove(noun, player, state)
+    elif verb == "shake":
+        return handle_shake(noun, player, state)
+    elif verb == "slap":
+        return handle_slap(noun, player, state)
     elif verb == "talk":
         return handle_talk(noun, player, state)
     elif verb == "ask":
@@ -1136,11 +1329,39 @@ def main():
                 if arrival_msg:
                     print(f"\n{arrival_msg}\n")
 
+        # Natural History Wing events
+        if _natural_history and player.current_room == _natural_history:
+            _natural_history.danny_moves += 1
+
+            # Whale growl — fires within first 3 turns in the wing
+            if (not _natural_history.whale_growl_fired and
+                    _natural_history.danny_moves <= 3 and
+                    _natural_history.danny_moves > 0):
+                if _natural_history.danny_moves == 2:
+                    _natural_history.whale_growl_fired = True
+                    print(f"\n{WHALE_GROWL_TEXT}\n")
+
+            # Danny sprint — fires if Nick lingers 5+ moves AND danny found
+            if (not _natural_history.danny_sprint_fired and
+                    state.danny_found and
+                    _natural_history.danny_moves >= 5):
+                _natural_history.danny_sprint_fired = True
+                state.danny_gone = True
+                danny_key.takeable = False  # key leaves with Danny
+                print(f"\n{DANNY_SPRINT_TEXT}\n")
+
         # Maya exit countdown
         if _main_lobby and player.current_room == _main_lobby:
             maya_exit_msg = check_maya_exit(player, state)
             if maya_exit_msg:
                 print(f"\n{maya_exit_msg}\n")
+
+        # Mask death mechanic
+        if state.mask_worn:
+            state.mask_worn_turns += 1
+            _print_mask_turn(state)
+            if state.mask_worn_turns >= state.MASK_DEATH_TURNS:
+                _mask_death()
 
         # Hunger check
         hunger_msg = state.get_hunger_message()

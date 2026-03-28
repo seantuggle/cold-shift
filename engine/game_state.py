@@ -1,81 +1,143 @@
 # engine/game_state.py
-# COLD SHIFT — global game state
+# Central truth for all game flags and counters.
+# Everything that needs to persist across rooms lives here.
 
 class GameState:
     def __init__(self):
-
-        # --- Core ---
+        # --- Move counter ---
         self.moves = 0
-        self.game_over = False
+
+        # --- Hunger system ---
+        self.hunger_level = 0          # 0=fine, 1=peckish, 2=hungry, 3=starving
+        self.moves_since_eating = 0
+        self.HUNGER_INTERVAL = 20      # hunger ticks every 20 moves
+
+        # --- Radio ---
+        self.radio_on = False
+        self.radio_taken = False
 
         # --- Karen ---
-        self.last_karen_call = 0
-        self.KAREN_INTERVAL = 15
-        self.karen_calls = 0
+        self.karen_calls = 0           # how many times Karen has radioed
+        self.last_karen_call = 0       # move number of last Karen call
+        self.KAREN_INTERVAL = 30       # Karen checks in every 30 moves
 
-        # --- Equipment ---
-        self.radio_taken = False
-        self.radio_on = False
-        self.flashlight_on = False
+        # --- Monitor state ---
+        self.monitor_7_examined = False
+        self.monitor_anomaly_seen = False  # mid-game monitor changes
 
-        # --- Puzzle flags ---
-        self.postit_reversed = False
-        self.logbook_written = False
-        self.donations_opened = False
-        self.wait_count = 0
+        # --- Danny ---
+        self.danny_found = False
+        self.danny_note_read = False
+        self.danny_gone = False
+        self.danny_key_taken = False
+
+        # --- Yellow can ---
+        self.can_attempted = False
+        self.can_thrown = False
+
+        # --- Manuscript ---
+        self.manuscript_found = False
+        self.manuscript_read = False
+        self.manuscript_fragment_found = False
+        self.postit_reversed = False   # player figured out the anagram
+
+        # --- Mask ---
+        self.mask_found = False
+        self.mask_worn = False
+        self.mask_worn_turns = 0
+        self.mask_location = "floor"   # 'floor', 'inventory', 'worn', 'vault'
+        self.MASK_DEATH_TURNS = 10
+        self.mask_examine_count = 0
+
+        # --- Etching ---
+        self.etching_taken = False
+        self.etching_surface = None    # 'mask' or 'manuscript'
+        self.has_paper = False
+
+        # --- Portal ---
+        self.blood_on_mask = False
+        self.incantation_spoken = False
+        self.portal_open = False
 
         # --- Maya ---
-        self.maya_called = False
         self.maya_met = False
-        self.lobby_entered = False
-        self.maya_coffee_given = False
-        self.maya_positive = False
-
-        # --- Act system ---
-        self.act = 1
-
-        # --- Item state ---
-        self.snow_globe_visits = 0
-
-        # --- Coin curse ---
-        self.coin_pickup_turn = None  # set to state.moves when strange coin is taken
+        self.maya_note_found = False
+        self.maya_called = False
+        self.phone_dead = False
 
         # --- Gum ---
-        self.gum_chewing = False      # True while Nick is chewing
-        self.gum_chew_start = None    # state.moves when chewing began
-        self.gum_consumed = False     # True once spat/discarded
+        self.gum_chewing = False
+        self.gum_chew_start = None
+        self.gum_consumed = False
 
-        # --- Hunger ---
-        self.hunger = 60
+        # --- Strange coin ---
+        self.coin_pickup_turn = None
 
-    def eat(self, n):
-        """Reset hunger clock by n moves."""
-        self.hunger += n
+        # --- Game act (1, 2, 3) ---
+        self.act = 1
+
+        # --- General progression flags ---
+        self.logbook_written = False
+        self.radio_picked_up = False
+        self.flashlight_on = False
+        self.crate_examined = False
+        self.vault_found = False
+
+        # --- Ending ---
+        self.game_over = False
+        self.ending = None             # 'death_mask', 'death_carcosa', 'survived'
 
     def tick(self):
-        """Called once per player action."""
+        """Call once per move. Updates hunger and Karen timers."""
         self.moves += 1
-        if self.hunger > 0:
-            self.hunger -= 1
+        self.moves_since_eating += 1
+        self._update_hunger()
+        self._check_karen()
+
+    def _update_hunger(self):
+        if self.moves_since_eating >= self.HUNGER_INTERVAL * 4:
+            self.hunger_level = 3
+        elif self.moves_since_eating >= self.HUNGER_INTERVAL * 3:
+            self.hunger_level = 2
+        elif self.moves_since_eating >= self.HUNGER_INTERVAL * 2:
+            self.hunger_level = 1
+        else:
+            self.hunger_level = 0
+
+    def _check_karen(self):
+        """Returns True if Karen should interrupt this move."""
+        if self.moves - self.last_karen_call >= self.KAREN_INTERVAL:
+            return True
+        return False
+
+    def eat(self, reset_amount):
+        """Call when player consumes food. reset_amount in moves."""
+        self.moves_since_eating = max(0, self.moves_since_eating - reset_amount)
+        self._update_hunger()
 
     def get_hunger_message(self):
-        """Returns a hunger warning string or None."""
-        if self.hunger <= 0:
+        """Returns hunger flavor text appropriate to current level, or None."""
+        # Only fire at the exact interval boundaries
+        if self.moves_since_eating == self.HUNGER_INTERVAL:
             return (
-                "You are very hungry.\n\n"
-                "This is not a metaphor. Your body is staging a formal complaint. "
-                "You need to find something to eat. Soon. Like, now."
+                "Your stomach makes a noise that the empty museum "
+                "politely ignores."
             )
-        elif self.hunger <= 10:
+        elif self.moves_since_eating == self.HUNGER_INTERVAL * 2:
             return (
-                "Your stomach makes a sound.\n\n"
-                "Not a polite sound. A sound that has opinions about your life choices. "
-                "You should find food."
+                "You haven't eaten since — actually, when did you eat? "
+                "Today feels like it happened to someone else."
             )
-        elif self.hunger <= 20:
+        elif self.moves_since_eating == self.HUNGER_INTERVAL * 3:
             return (
-                "You're getting hungry. "
-                "The kind of hungry that makes everything slightly worse "
-                "than it already is."
+                "The hunger is a specific, insistent thing now. "
+                "Less background noise, more main event."
             )
+        elif self.moves_since_eating >= self.HUNGER_INTERVAL * 4:
+            if self.moves_since_eating % self.HUNGER_INTERVAL == 0:
+                return (
+                    "You are operating on caffeine, spite, and whatever "
+                    "psychic residue the museum is pumping through the vents. "
+                    "This is fine."
+                )
         return None

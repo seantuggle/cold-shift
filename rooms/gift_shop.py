@@ -514,7 +514,7 @@ GIFT_SHOP_AMBIENT = [
 
 def _first_visit(state):
     """Fires once when Nick enters the gift shop for the first time."""
-    if getattr(state, "maya_positive", False):
+    if getattr(state, "maya_met", False):
         return (
             "You smell it before you find it.\n\n"
             "Coffee. Good coffee — not the security office kind. "

@@ -34,7 +34,6 @@ VERB_MAP = {
     "remove": "remove", "take off": "remove",
     "eat": "eat", "consume": "eat", "taste": "eat",
     "drink": "drink", "sip": "drink", "swallow": "drink",
-    "chew": "chew", "spit": "chew", 
     "call": "call", "phone": "call", "dial": "call",
     "radio": "call",
     "write": "write", "sign": "write", "fill": "write",
@@ -44,6 +43,9 @@ VERB_MAP = {
     "reverse": "reverse", "flip": "reverse",
     "speak": "speak", "say": "speak", "recite": "speak",
     "listen": "listen",
+
+    "shake": "shake", "grab": "shake",
+    "slap": "slap", "hit": "slap", "smack": "slap",
 
     # social
     "talk": "talk", "speak to": "talk", "talk to": "talk",
